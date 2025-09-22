@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Inventario de Madera — Kardex PT (Compartido)</title>
+  <title>Inventario de Madera — Kardex PT</title>
   <style>
     :root{ --bg:#0f172a; --card:#0b1220; --line:#1f2937; --muted:#93a3b8; --text:#e5e7eb; --accent:#22c55e; --danger:#ef4444; --blue:#3b82f6 }
     *{box-sizing:border-box}
@@ -29,23 +29,17 @@
     .right{text-align:right}
     .toolbar{display:flex;gap:8px;flex-wrap:wrap}
     .badge{font-size:12px;background:#094; padding:2px 8px;border-radius:999px}
-    .tests{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;white-space:pre-wrap;background:#0a1220;border:1px solid #1f2937;border-radius:12px;padding:8px;color:#c7d2fe}
-    details[open] > summary::marker{content:""}
-    details > summary{cursor:pointer; list-style:none}
     @media(max-width:960px){.grid{grid-template-columns:repeat(2,1fr)}.col-2,.col-3,.col-6{grid-column:span 2}}
   </style>
   <!-- SheetJS para generar Excel -->
   <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
-  <!-- Firebase compat (Realtime Database) -->
-  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
 </head>
 <body>
   <div class="wrap">
     <header class="row" style="align-items:flex-end;justify-content:space-between">
       <div>
-        <h1>Inventario de Madera — Kardex en PT (Compartido)</h1>
-        <div class="note">Registra <b>ingresos</b> y <b>salidas</b> por especie, lote, ubicación y <b>medidas (cm)</b>. Calcula <b>pie tablar (PT)</b> y saldos agrupados. Datos sincronizados en la nube. Exporta a <b>Excel (.xlsx)</b>.</div>
+        <h1>Inventario de Madera — Kardex en PT</h1>
+        <div class="note">Registra <b>ingresos</b> y <b>salidas</b> por especie, lote, ubicación y <b>medidas (cm)</b>. Calcula <b>pie tablar (PT)</b> y saldos agrupados. Exporta únicamente a <b>Excel (.xlsx)</b>.</div>
       </div>
       <div class="toolbar">
         <button id="btn-export-local" class="primary" title="Descargar Excel">Descargar Excel (.xlsx)</button>
@@ -121,8 +115,10 @@
           <input type="text" id="obs" placeholder="Proveedor, calidad, guía, etc." />
         </div>
         <div class="col-6 toolbar">
-          <button type="button" id="btn-add" class="primary">Agregar movimiento (nube)</button>
-          <button type="button" id="btn-clear-cloud" class="danger">Vaciar TODO (nube)</button>
+          <button type="button" id="btn-add" class="primary">Agregar movimiento</button>
+          <button type="button" id="btn-save" class="ghost">Guardar dispositivo</button>
+          <button type="button" id="btn-load" class="ghost">Cargar guardado</button>
+          <button type="button" id="btn-clear" class="danger">Vaciar todo</button>
         </div>
         <div class="col-6 note">Las medidas son en <b>cm</b>. El sistema calcula PT por pieza y por movimiento. 1 PT = 144 in³ (1 in = 2.54 cm).</div>
       </form>
@@ -185,11 +181,6 @@
       </div>
     </section>
 
-    <details style="margin-top:12px">
-      <summary class="note">Ver pruebas automáticas (unit tests)</summary>
-      <div id="test-log" class="tests"></div>
-    </details>
-
     <p class="note">Los saldos se calculan tipo <b>Kardex</b> simple (cantidad). Si usas precios, se acumula subtotal por movimiento (no método de valoración específico). Podemos implementar <b>Promedio Ponderado</b> o <b>PEPS</b> si lo deseas.</p>
   </div>
 
@@ -203,35 +194,6 @@
     // ===== Estado =====
     let movimientos = [];
     const keyOf = r => [r.especie, r.lote, r.ubicacion, r.largo, r.ancho, r.espesor].join('|');
-
-    // ===== Firebase (compartido) =====
-    const firebaseConfig = {
-      apiKey: "PEGAR_API_KEY",
-      authDomain: "PEGAR_PROJECT_ID.firebaseapp.com",
-      databaseURL: "https://PEGAR_PROJECT_ID-default-rtdb.firebaseio.com",
-      projectId: "PEGAR_PROJECT_ID",
-      storageBucket: "PEGAR_PROJECT_ID.appspot.com",
-      messagingSenderId: "PEGAR_SENDER_ID",
-      appId: "PEGAR_APP_ID"
-    };
-
-    let fbApp, dbRef;
-    function initFirebase(){
-      try{
-        fbApp = firebase.initializeApp(firebaseConfig);
-        const db = firebase.database();
-        dbRef = db.ref('kardex_madera/movimientos');
-        bindRealtime(dbRef);
-      }catch(e){ console.error(e); alert('No se pudo inicializar Firebase. Revisa el config.'); }
-    }
-
-    function bindRealtime(ref){
-      movimientos = [];
-      ref.off();
-      ref.on('child_added', snap=>{ movimientos.push({ id:snap.key, ...snap.val() }); render(); });
-      ref.on('child_changed', snap=>{ const idx = movimientos.findIndex(x=>x.id===snap.key); if(idx>-1){ movimientos[idx] = { id:snap.key, ...snap.val() }; render(); }});
-      ref.on('child_removed', snap=>{ const idx = movimientos.findIndex(x=>x.id===snap.key); if(idx>-1){ movimientos.splice(idx,1); render(); }});
-    }
 
     function leerForm(){
       const r = {
@@ -260,19 +222,11 @@
 
     function agregar(){
       const r = leerForm(); if(!r) return;
-      if(!dbRef){ alert('Base en nube no inicializada.'); return; }
-      const payload = { ...r, createdAt: Date.now() };
-      dbRef.push(payload, (err)=>{
-        if(err){ alert('Error al guardar en la nube'); console.error(err); }
-        else { $('#form').reset(); $('#fecha').value = new Date().toISOString().slice(0,10); }
-      });
+      movimientos.push(r); render();
+      $('#form').reset(); $('#fecha').value = new Date().toISOString().slice(0,10);
     }
 
-    // 🔧 FIX: función sin llave extra
-    function borrarId(id){
-      if(!dbRef) return;
-      if(confirm('¿Eliminar movimiento?')) dbRef.child(id).remove();
-    }
+    function borrar(idx){ if(confirm('¿Eliminar movimiento?')){ movimientos.splice(idx,1); render(); } }
 
     function render(){
       // Movimientos
@@ -296,7 +250,7 @@
           <td>${m.precio? m.precio.toFixed(2): ''}</td>
           <td>${m.subtotal!==null? m.subtotal.toFixed(2): ''}</td>
           <td>${m.obs||''}</td>
-          <td><button class="danger" onclick="borrarId('${m.id}')">Borrar</button></td>`;
+          <td><button class="danger" onclick="borrar(${i})">Borrar</button></td>`;
         tbody.appendChild(tr);
         tQty += (m.tipo==='Salida'?-m.cantidad:m.cantidad);
         tPT  += m.pt_mov; tQ += m.subtotal||0;
@@ -339,12 +293,14 @@
       $('#saldoQ').textContent   = sQ.toFixed(2);
       $('#badgeItems').textContent = `${items} ítems`;
 
-      // Caché local de vista
-      localStorage.setItem('kardex_madera_cache', JSON.stringify(movimientos.map(({id, ...rest})=>rest)));
+      // Guardado automático
+      localStorage.setItem('kardex_madera_simple', JSON.stringify(movimientos));
     }
 
-    // ===== Acciones nube =====
-    function vaciarNube(){ if(!dbRef) return; if(confirm('¿Eliminar TODO de la nube?')) dbRef.remove(); }
+    // ===== Persistencia local =====
+    const guardar = ()=>{ localStorage.setItem('kardex_madera_simple', JSON.stringify(movimientos)); alert('Guardado en este dispositivo.'); }
+    const cargar  = ()=>{ try{ const d = JSON.parse(localStorage.getItem('kardex_madera_simple')||'[]'); movimientos = Array.isArray(d)? d: []; render(); }catch{ alert('No se pudo cargar.'); } }
+    const vaciar  = ()=>{ if(confirm('¿Vaciar TODO?')){ movimientos = []; render(); } }
 
     // ===== Exportación a Excel (.xlsx) =====
     function buildWorkbook(){
@@ -374,44 +330,16 @@
       XLSX.writeFile(wb, name);
     }
 
-    // ===== Pruebas básicas (no tocan la nube) =====
-    function runTests(){
-      const logs = [];
-      function ok(name, cond){ logs.push(`${cond? '✅':'❌'} ${name}`); if(!cond) console.error('Test failed:', name); }
-      // 1) ptPerPiece: 2.54cm x 2.54cm x 2.54cm = 1in x1in x1in / 144 = 1/144 bf
-      const pt1 = ptPerPiece(2.54,2.54,2.54); ok('ptPerPiece(2.54cm³) ≈ 1/144', Math.abs(pt1 - (1/144)) < 1e-6);
-      // 2) Signo de movimiento
-      const ingreso = {tipo:'Ingreso', largo:254, ancho:2.54, espesor:2.54, cantidad:10};
-      const salida  = {tipo:'Salida',  largo:254, ancho:2.54, espesor:2.54, cantidad:10};
-      ingreso.pt_pieza = ptPerPiece(ingreso.largo, ingreso.ancho, ingreso.espesor);
-      salida.pt_pieza  = ptPerPiece(salida.largo,  salida.ancho,  salida.espesor);
-      ingreso.pt_mov = ingreso.pt_pieza * ingreso.cantidad; salida.pt_mov = -salida.pt_pieza * salida.cantidad;
-      ok('Ingreso positivo', ingreso.pt_mov > 0);
-      ok('Salida negativa', salida.pt_mov < 0);
-      // 3) keyOf agrupa
-      const kA = keyOf({especie:'PINO',lote:'L1',ubicacion:'PATIO',largo:100,ancho:10,espesor:2});
-      const kB = keyOf({especie:'PINO',lote:'L1',ubicacion:'PATIO',largo:100,ancho:10,espesor:2});
-      ok('keyOf igual para mismo item', kA === kB);
-      // 4) Totales de ejemplo
-      const ejemplo = [
-        {tipo:'Ingreso', largo:254,ancho:2.54,espesor:2.54,cantidad:10},
-        {tipo:'Salida',  largo:254,ancho:2.54,espesor:2.54,cantidad:4}
-      ];
-      const tot = ejemplo.reduce((acc,m)=>{const s=m.tipo==='Salida'?-1:1; const p=ptPerPiece(m.largo,m.ancho,m.espesor); return {qty:acc.qty+s*m.cantidad, pt:acc.pt+s*m.cantidad*p};},{qty:0,pt:0});
-      ok('Kardex simple acumula qty', tot.qty === 6);
-      ok('Kardex simple acumula PT', tot.pt > 0);
-      $('#test-log').textContent = logs.join('\n');
-    }
-
     // ===== Eventos =====
     $('#btn-add').onclick = agregar;
-    $('#btn-clear-cloud').onclick = vaciarNube;
+    $('#btn-save').onclick = guardar;
+    $('#btn-load').onclick = cargar;
+    $('#btn-clear').onclick = vaciar;
     $('#btn-export-local').onclick = downloadXLSX;
 
     // Inicialización
     $('#fecha').value = new Date().toISOString().slice(0,10);
-    runTests();
-    initFirebase();
+    cargar();
   </script>
 </body>
 </html>

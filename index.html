@@ -1,345 +1,106 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Inventario de Madera — Kardex PT</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Inventario Madera — Compartido (Realtime)</title>
   <style>
-    :root{ --bg:#0f172a; --card:#0b1220; --line:#1f2937; --muted:#93a3b8; --text:#e5e7eb; --accent:#22c55e; --danger:#ef4444; --blue:#3b82f6 }
-    *{box-sizing:border-box}
-    body{margin:0;background:linear-gradient(180deg,var(--bg),#020617 70%);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,sans-serif}
-    .wrap{max-width:1200px;margin:24px auto;padding:12px}
-    h1{margin:0 0 6px;font-size:clamp(20px,4vw,28px)}
-    .note{color:var(--muted);font-size:12px}
-    .row{display:flex;gap:12px;flex-wrap:wrap}
-    .card{flex:1 1 360px;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px;box-shadow:0 10px 30px rgba(0,0,0,.25)}
+    :root{--bg:#0f172a;--card:#0b1220;--muted:#93a3b8;--text:#e5e7eb;--accent:#22c55e;--danger:#ef4444;--blue:#3b82f6}
+    *{box-sizing:border-box} body{margin:0;background:linear-gradient(180deg,var(--bg),#020617 70%);color:var(--text);font-family:system-ui,Segoe UI,Roboto}
+    .wrap{max-width:1100px;margin:20px auto;padding:14px}
+    h1{margin:0 0 8px}
+    .card{background:var(--card); padding:14px; border-radius:12px; border:1px solid rgba(255,255,255,0.03)}
+    form .row{display:grid;grid-template-columns:repeat(6,1fr);gap:8px}
     label{font-size:12px;color:var(--muted)}
-    input,select{width:100%;padding:10px;border:1px solid var(--line);border-radius:10px;background:#070c16;color:var(--text)}
-    input:focus,select:focus{outline:2px solid var(--blue);border-color:var(--blue)}
-    .grid{display:grid;grid-template-columns:repeat(6,1fr);gap:10px}
-    .col-2{grid-column:span 2}.col-3{grid-column:span 3}.col-6{grid-column:span 6}
-    button{border:0;border-radius:999px;padding:10px 14px;cursor:pointer;background:#1f2937;color:var(--text)}
-    .primary{background:var(--accent);color:#052e16;font-weight:800}
-    .danger{background:var(--danger);color:#fff}
-    .ghost{background:#0b1220}
-    table{width:100%;border-collapse:collapse}
-    th,td{padding:8px;border-bottom:1px solid var(--line);text-align:left}
-    th{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
-    tfoot td{font-weight:800}
-    .right{text-align:right}
-    .toolbar{display:flex;gap:8px;flex-wrap:wrap}
-    .badge{font-size:12px;background:#094; padding:2px 8px;border-radius:999px}
-    @media(max-width:960px){.grid{grid-template-columns:repeat(2,1fr)}.col-2,.col-3,.col-6{grid-column:span 2}}
+    input,select{padding:8px;border-radius:8px;border:1px solid rgba(255,255,255,0.04);background:#07101a;color:var(--text)}
+    button{padding:8px 12px;border-radius:999px;border:0;background:var(--accent);color:#052e16;font-weight:700;cursor:pointer}
+    table{width:100%;border-collapse:collapse;margin-top:10px} th,td{padding:8px;border-bottom:1px solid rgba(255,255,255,0.03);text-align:left}
+    .danger{background:var(--danger);color:white}
+    .small{font-size:13px;color:var(--muted)}
+    .toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
   </style>
-  <!-- SheetJS para generar Excel -->
+
+  <!-- SheetJS para export a Excel -->
   <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+
+  <!-- Firebase compat (fácil de integrar) -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
 </head>
 <body>
   <div class="wrap">
-    <header class="row" style="align-items:flex-end;justify-content:space-between">
+    <header style="display:flex;justify-content:space-between;align-items:end;gap:12px;margin-bottom:12px">
       <div>
-        <h1>Inventario de Madera — Kardex en PT</h1>
-        <div class="note">Registra <b>ingresos</b> y <b>salidas</b> por especie, lote, ubicación y <b>medidas (cm)</b>. Calcula <b>pie tablar (PT)</b> y saldos agrupados. Exporta únicamente a <b>Excel (.xlsx)</b>.</div>
+        <h1>Inventario de Madera — Compartido</h1>
+        <div class="small">Los movimientos se sincronizan en <b>tiempo real</b> entre todos los usuarios.</div>
       </div>
-      <div class="toolbar">
-        <button id="btn-export-local" class="primary" title="Descargar Excel">Descargar Excel (.xlsx)</button>
+      <div class="toolbar card" style="padding:8px">
+        <button id="btn-download">Descargar Excel (.xlsx)</button>
+        <button id="btn-clear-local" class="danger">Vaciar local</button>
       </div>
     </header>
 
-    <!-- Formulario de movimiento -->
-    <section class="card" style="margin-top:12px">
-      <form id="form" class="grid">
-        <div class="col-2">
-          <label>Fecha</label>
-          <input type="date" id="fecha" />
-        </div>
-        <div>
-          <label>Tipo</label>
-          <select id="tipo">
-            <option value="Ingreso">Ingreso</option>
-            <option value="Salida">Salida</option>
-          </select>
-        </div>
-        <div>
-          <label>Lote</label>
-          <input type="text" id="lote" placeholder="L-2025-09-01" />
-        </div>
-        <div class="col-2">
-          <label>Especie</label>
-          <select id="especie">
-            <option value="PALO BLANCO">PALO BLANCO</option>
-            <option value="PINO">PINO</option>
-            <option value="CAOBA">CAOBA</option>
-            <option value="ENCINO">ENCINO</option>
-            <option value="LIQUIDAMBAR">LIQUIDAMBAR</option>
-            <option value="TECA">TECA</option>
-            <option value="CIPRES">CIPRES</option>
-            <option value="EUCALIPTOS">EUCALIPTOS</option>
-            <option value="OTROS">OTROS</option>
-          </select>
-        </div>
-        <div>
-          <label>Ubicación</label>
-          <select id="ubicacion">
-            <option value="PATIO OFICINA">PATIO OFICINA</option>
-            <option value="PATIO CEIBA">PATIO CEIBA</option>
-            <option value="PATIO SECADORA">PATIO SECADORA</option>
-            <option value="ADENTRO DE CARPINTERIA">ADENTRO DE CARPINTERIA</option>
-            <option value="GALERA">GALERA</option>
-            <option value="OTRO">OTRO</option>
-          </select>
-        </div>
+    <section class="card">
+      <form id="form">
+        <div class="row">
+          <div>
+            <label>Fecha</label><input id="fecha" type="date" />
+          </div>
+          <div>
+            <label>Tipo</label>
+            <select id="tipo"><option>Ingreso</option><option>Salida</option></select>
+          </div>
+          <div>
+            <label>Lote</label><input id="lote" placeholder="L-2025-09-01" />
+          </div>
 
-        <div>
-          <label>Largo (cm)</label>
-          <input type="number" id="largo" min="0" step="0.01" />
+          <div>
+            <label>Especie</label>
+            <select id="especie">
+              <option>Palo Blanco</option><option>Pino</option><option>Caoba</option><option>Encino</option>
+              <option>Liquidambar</option><option>Teca</option><option>Cipres</option><option>Eucaliptos</option><option>Otros</option>
+            </select>
+          </div>
+
+          <div>
+            <label>Ubicación</label>
+            <select id="ubicacion">
+              <option>Patio Oficina</option><option>Patio Ceiba</option><option>Patio Secadora</option>
+              <option>Adentro de Carpintería</option><option>Galera</option><option>Otro</option>
+            </select>
+          </div>
+
+          <div>
+            <label>Largo (cm)</label><input id="largo" type="number" step="0.01" />
+          </div>
+          <div>
+            <label>Ancho (cm)</label><input id="ancho" type="number" step="0.01" />
+          </div>
+          <div>
+            <label>Espesor (cm)</label><input id="espesor" type="number" step="0.01" />
+          </div>
+          <div>
+            <label>Cantidad (piezas)</label><input id="cantidad" type="number" step="1" min="1" />
+          </div>
+          <div>
+            <label>Precio (Q) opcional</label><input id="precio" type="number" step="0.01" />
+          </div>
+          <div style="grid-column:span 6">
+            <label>Observaciones</label><input id="obs" />
+          </div>
+
+          <div style="grid-column:span 6;display:flex;gap:8px;margin-top:8px">
+            <button type="button" id="btn-add">Agregar movimiento (guardar en nube)</button>
+            <button type="button" id="btn-add-local" style="background:#7f8c8d">Agregar solo local</button>
+            <div class="small" style="align-self:center">Si quieres que otros vean, usa <b>Agregar movimiento</b>.</div>
+          </div>
         </div>
-        <div>
-          <label>Ancho (cm)</label>
-          <input type="number" id="ancho" min="0" step="0.01" />
-        </div>
-        <div>
-          <label>Espesor (cm)</label>
-          <input type="number" id="espesor" min="0" step="0.01" />
-        </div>
-        <div>
-          <label>Cantidad (piezas)</label>
-          <input type="number" id="cantidad" min="1" step="1" />
-        </div>
-        <div>
-          <label>Precio (Q) opcional</label>
-          <input type="number" id="precio" min="0" step="0.01" />
-        </div>
-        <div class="col-6">
-          <label>Observaciones</label>
-          <input type="text" id="obs" placeholder="Proveedor, calidad, guía, etc." />
-        </div>
-        <div class="col-6 toolbar">
-          <button type="button" id="btn-add" class="primary">Agregar movimiento</button>
-          <button type="button" id="btn-save" class="ghost">Guardar dispositivo</button>
-          <button type="button" id="btn-load" class="ghost">Cargar guardado</button>
-          <button type="button" id="btn-clear" class="danger">Vaciar todo</button>
-        </div>
-        <div class="col-6 note">Las medidas son en <b>cm</b>. El sistema calcula PT por pieza y por movimiento. 1 PT = 144 in³ (1 in = 2.54 cm).</div>
       </form>
     </section>
 
-    <!-- Movimientos -->
     <section class="card" style="margin-top:12px">
-      <div style="overflow:auto">
+      <h3 style="margin:6px 0">Movimientos (en la nube)</h3>
+      <div class="small">Los movimientos visibles son los que existen en la base compartida.</div>
+      <div style="overflow:auto;margin-top:8px">
         <table id="tbl-mov">
           <thead>
-            <tr>
-              <th>#</th><th>Fecha</th><th>Tipo</th><th>Especie</th><th>Lote</th><th>Ubicación</th>
-              <th>Largo</th><th>Ancho</th><th>Espesor</th><th>Qty</th>
-              <th>PT/pza</th><th>PT mov</th><th>Precio</th><th>Subtotal</th><th>Obs</th><th>Acciones</th>
-            </tr>
-          </thead>
-          <tbody></tbody>
-          <tfoot>
-            <tr>
-              <td colspan="9" class="right">Totales</td>
-              <td id="movQty">0</td>
-              <td></td>
-              <td id="movPT">0.000</td>
-              <td></td>
-              <td id="movQ">0.00</td>
-              <td></td>
-              <td></td>
-            </tr>
-          </tfoot>
-        </table>
-      </div>
-    </section>
-
-    <!-- Saldos actuales agrupados -->
-    <section class="card" style="margin-top:12px">
-      <div class="toolbar" style="justify-content:space-between;align-items:center;margin-bottom:8px">
-        <div><b>Saldos actuales</b> <span class="note">(agrupado por especie + lote + ubicación + medidas)</span></div>
-        <div class="badge" id="badgeItems">0 ítems</div>
-      </div>
-      <div style="overflow:auto">
-        <table id="tbl-saldo">
-          <thead>
-            <tr>
-              <th>Especie</th><th>Lote</th><th>Ubicación</th>
-              <th>Largo</th><th>Ancho</th><th>Espesor</th>
-              <th>Qty saldo</th><th>PT/pza</th><th>PT saldo</th><th>Valor Q (opcional)</th>
-            </tr>
-          </thead>
-          <tbody></tbody>
-          <tfoot>
-            <tr>
-              <td colspan="6" class="right">Totales</td>
-              <td id="saldoQty">0</td>
-              <td></td>
-              <td id="saldoPT">0.000</td>
-              <td id="saldoQ">0.00</td>
-            </tr>
-          </tfoot>
-        </table>
-      </div>
-    </section>
-
-    <p class="note">Los saldos se calculan tipo <b>Kardex</b> simple (cantidad). Si usas precios, se acumula subtotal por movimiento (no método de valoración específico). Podemos implementar <b>Promedio Ponderado</b> o <b>PEPS</b> si lo deseas.</p>
-  </div>
-
-  <script>
-    // ===== Utilidades =====
-    const $ = s=>document.querySelector(s);
-    const round = (n,d=3)=>Number.parseFloat(n||0).toFixed(d);
-    const cmToIn = cm => (cm||0)/2.54;
-    const ptPerPiece = (lcm,acm,ecm)=> (cmToIn(lcm)*cmToIn(acm)*cmToIn(ecm))/144;
-
-    // ===== Estado =====
-    let movimientos = [];
-    const keyOf = r => [r.especie, r.lote, r.ubicacion, r.largo, r.ancho, r.espesor].join('|');
-
-    function leerForm(){
-      const r = {
-        fecha: $('#fecha').value || new Date().toISOString().slice(0,10),
-        tipo: $('#tipo').value,
-        lote: $('#lote').value.trim(),
-        especie: $('#especie').value,
-        ubicacion: $('#ubicacion').value,
-        largo: Number($('#largo').value),
-        ancho: Number($('#ancho').value),
-        espesor: Number($('#espesor').value),
-        cantidad: Number($('#cantidad').value),
-        precio: Number($('#precio').value)||null,
-        obs: $('#obs').value.trim()
-      };
-      if(!r.largo||!r.ancho||!r.espesor||!r.cantidad||!r.especie){
-        alert('Completa especie, medidas y cantidad.');
-        return null;
-      }
-      r.pt_pieza = ptPerPiece(r.largo, r.ancho, r.espesor);
-      const signo = r.tipo==='Salida' ? -1 : 1;
-      r.pt_mov = r.pt_pieza * r.cantidad * signo;
-      r.subtotal = r.precio ? r.precio * r.cantidad * (signo>0?1:-1) : null;
-      return r;
-    }
-
-    function agregar(){
-      const r = leerForm(); if(!r) return;
-      movimientos.push(r); render();
-      $('#form').reset(); $('#fecha').value = new Date().toISOString().slice(0,10);
-    }
-
-    function borrar(idx){ if(confirm('¿Eliminar movimiento?')){ movimientos.splice(idx,1); render(); } }
-
-    function render(){
-      // Movimientos
-      const tbody = $('#tbl-mov tbody'); tbody.innerHTML = '';
-      let tQty=0, tPT=0, tQ=0;
-      movimientos.forEach((m,i)=>{
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-          <td>${i+1}</td>
-          <td>${m.fecha}</td>
-          <td>${m.tipo}</td>
-          <td>${m.especie}</td>
-          <td>${m.lote}</td>
-          <td>${m.ubicacion}</td>
-          <td>${m.largo}</td>
-          <td>${m.ancho}</td>
-          <td>${m.espesor}</td>
-          <td>${m.tipo==='Salida'?-m.cantidad:m.cantidad}</td>
-          <td>${round(m.pt_pieza)}</td>
-          <td>${round(m.pt_mov)}</td>
-          <td>${m.precio? m.precio.toFixed(2): ''}</td>
-          <td>${m.subtotal!==null? m.subtotal.toFixed(2): ''}</td>
-          <td>${m.obs||''}</td>
-          <td><button class="danger" onclick="borrar(${i})">Borrar</button></td>`;
-        tbody.appendChild(tr);
-        tQty += (m.tipo==='Salida'?-m.cantidad:m.cantidad);
-        tPT  += m.pt_mov; tQ += m.subtotal||0;
-      });
-      $('#movQty').textContent = tQty;
-      $('#movPT').textContent  = round(tPT);
-      $('#movQ').textContent   = tQ.toFixed(2);
-
-      // Saldos agrupados
-      const map = new Map();
-      for(const m of movimientos){
-        const k = keyOf(m);
-        if(!map.has(k)) map.set(k,{...m, cantidad:0, pt_pieza:m.pt_pieza, pt_saldo:0, valor:0});
-        const it = map.get(k);
-        it.cantidad += (m.tipo==='Salida'?-m.cantidad:m.cantidad);
-        it.pt_saldo += m.pt_mov;
-        it.valor    += m.subtotal||0; // acumulado simple
-      }
-      const saldoBody = $('#tbl-saldo tbody'); saldoBody.innerHTML = '';
-      let sQty=0, sPT=0, sQ=0, items=0;
-      for(const it of map.values()){
-        if(it.cantidad===0 && Math.abs(it.pt_saldo)<1e-9) continue; // ocultar cero
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-          <td>${it.especie}</td>
-          <td>${it.lote}</td>
-          <td>${it.ubicacion}</td>
-          <td>${it.largo}</td>
-          <td>${it.ancho}</td>
-          <td>${it.espesor}</td>
-          <td>${it.cantidad}</td>
-          <td>${round(it.pt_pieza)}</td>
-          <td>${round(it.pt_saldo)}</td>
-          <td>${it.valor? it.valor.toFixed(2): ''}</td>`;
-        saldoBody.appendChild(tr);
-        sQty += it.cantidad; sPT += it.pt_saldo; sQ += it.valor||0; items++;
-      }
-      $('#saldoQty').textContent = sQty;
-      $('#saldoPT').textContent  = round(sPT);
-      $('#saldoQ').textContent   = sQ.toFixed(2);
-      $('#badgeItems').textContent = `${items} ítems`;
-
-      // Guardado automático
-      localStorage.setItem('kardex_madera_simple', JSON.stringify(movimientos));
-    }
-
-    // ===== Persistencia local =====
-    const guardar = ()=>{ localStorage.setItem('kardex_madera_simple', JSON.stringify(movimientos)); alert('Guardado en este dispositivo.'); }
-    const cargar  = ()=>{ try{ const d = JSON.parse(localStorage.getItem('kardex_madera_simple')||'[]'); movimientos = Array.isArray(d)? d: []; render(); }catch{ alert('No se pudo cargar.'); } }
-    const vaciar  = ()=>{ if(confirm('¿Vaciar TODO?')){ movimientos = []; render(); } }
-
-    // ===== Exportación a Excel (.xlsx) =====
-    function buildWorkbook(){
-      const mov = movimientos.map((m,i)=>({
-        N:i+1, Fecha:m.fecha, Tipo:m.tipo, Especie:m.especie, Lote:m.lote, Ubicación:m.ubicacion,
-        Largo_cm:m.largo, Ancho_cm:m.ancho, Espesor_cm:m.espesor, Cantidad: m.tipo==='Salida'?-m.cantidad:m.cantidad,
-        PT_por_pieza: Number(round(m.pt_pieza)), PT_mov: Number(round(m.pt_mov)), Precio_Q: m.precio??'', Subtotal_Q:m.subtotal??'', Obs:m.obs??''
-      }));
-      const map = new Map();
-      for(const m of movimientos){ const k=keyOf(m); if(!map.has(k)) map.set(k,{...m, cantidad:0, pt_pieza:m.pt_pieza, pt_saldo:0, valor:0});
-        const it=map.get(k); it.cantidad += (m.tipo==='Salida'?-m.cantidad:m.cantidad); it.pt_saldo += m.pt_mov; it.valor += m.subtotal||0; }
-      const sal = Array.from(map.values()).filter(x=>x.cantidad!==0 || Math.abs(x.pt_saldo)>1e-9).map((it)=>({
-        Especie:it.especie, Lote:it.lote, Ubicación:it.ubicacion, Largo_cm:it.largo, Ancho_cm:it.ancho, Espesor_cm:it.espesor,
-        Cantidad_saldo:it.cantidad, PT_por_pieza:Number(round(it.pt_pieza)), PT_saldo:Number(round(it.pt_saldo)), Valor_Q: it.valor||''
-      }));
-      const wb = XLSX.utils.book_new();
-      const ws1 = XLSX.utils.json_to_sheet(mov);
-      const ws2 = XLSX.utils.json_to_sheet(sal);
-      XLSX.utils.book_append_sheet(wb, ws1, 'Movimientos');
-      XLSX.utils.book_append_sheet(wb, ws2, 'Saldos');
-      return wb;
-    }
-
-    function downloadXLSX(){
-      const wb = buildWorkbook();
-      const name = `kardex_madera_${new Date().toISOString().slice(0,10)}.xlsx`;
-      XLSX.writeFile(wb, name);
-    }
-
-    // ===== Eventos =====
-    $('#btn-add').onclick = agregar;
-    $('#btn-save').onclick = guardar;
-    $('#btn-load').onclick = cargar;
-    $('#btn-clear').onclick = vaciar;
-    $('#btn-export-local').onclick = downloadXLSX;
-
-    // Inicialización
-    $('#fecha').value = new Date().toISOString().slice(0,10);
-    cargar();
-  </script>
-</body>
-</html>

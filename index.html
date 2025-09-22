@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Inventario de Madera — Kardex PT</title>
+  <style>
+    :root{
+      --bg:#0f172a; --card:#0b1220; --line:#1f2937; --muted:#93a3b8; --text:#e5e7eb;
+      --accent:#22c55e; --danger:#ef4444; --amber:#f59e0b; --blue:#3b82f6;
+    }
+    *{box-sizing:border-box}
+    body{margin:0;background:linear-gradient(180deg,var(--bg),#020617 70%);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,sans-serif}
+    .wrap{max-width:1200px;margin:24px auto;padding:12px}
+    h1{margin:0 0 6px;font-size:clamp(20px,4vw,28px)}
+    .note{color:var(--muted);font-size:12px}
+    .row{display:flex;gap:12px;flex-wrap:wrap}
+    .card{flex:1 1 360px;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px;box-shadow:0 10px 30px rgba(0,0,0,.25)}
+    label{font-size:12px;color:var(--muted)}
+    input,select{width:100%;padding:10px;border:1px solid var(--line);border-radius:10px;background:#070c16;color:var(--text)}
+    input:focus,select:focus{outline:2px solid var(--blue);border-color:var(--blue)}
+    .grid{display:grid;grid-template-columns:repeat(6,1fr);gap:10px}
+    .col-2{grid-column:span 2}.col-3{grid-column:span 3}.col-6{grid-column:span 6}
+    button{border:0;border-radius:999px;padding:10px 14px;cursor:pointer;background:#1f2937;color:var(--text)}
+    .primary{background:var(--accent);color:#052e16;font-weight:800}
+    .danger{background:var(--danger);color:#fff}
+    .ghost{background:#0b1220}
+    table{width:100%;border-collapse:collapse}
+    th,td{padding:8px;border-bottom:1px solid var(--line);text-align:left}
+    th{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+    tfoot td{font-weight:800}
+    .right{text-align:right}
+    .toolbar{display:flex;gap:8px;flex-wrap:wrap}
+    .badge{font-size:12px;background:#094; padding:2px 8px;border-radius:999px}
+    @media(max-width:960px){.grid{grid-template-columns:repeat(2,1fr)}.col-2,.col-3,.col-6{grid-column:span 2}}
+  </style>
+  <!-- SheetJS para generar Excel -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+  <!-- Google API para Google Sheets -->
+  <script async defer src="https://apis.google.com/js/api.js"></script>
+</head>
+<body>
+  <div class="wrap">
+    <header class="row" style="align-items:flex-end;justify-content:space-between">
+      <div>
+        <h1>Inventario de Madera — Kardex en PT</h1>
+        <div class="note">Registra <b>ingresos</b> y <b>salidas</b> por medida (cm). Calcula <b>pie tablar (PT)</b> y saldos por <i>especie + lote + ubicación + medidas</i>. Exporta a <b>Google Drive</b> como Excel.</div>
+      </div>
+      <div class="toolbar">
+        <button id="btn-connect-g" class="ghost">Conectar Google Drive</button>
+        <button id="btn-upload-g" class="primary">Subir Excel a Drive</button>
+        <button id="btn-export-local" class="ghost">Descargar Excel</button>
+        <button id="btn-csv" class="ghost">Descargar CSV</button>
+      </div>
+    </header>
+
+    <!-- Barra para Google Sheets (envío directo a tu hoja) -->
+    <section class="card" style="margin-top:8px">
+      <div class="toolbar" style="flex-wrap:wrap">
+        <button id="btn-gs-login" class="ghost">Conectar Google Sheets</button>
+        <button id="btn-gs-send-last" class="primary">Enviar ÚLTIMO movimiento a Sheets</button>
+        <button id="btn-gs-send-all" class="ghost">Enviar TODOS los movimientos a Sheets</button>
+        <label class="note" style="display:flex;gap:6px;align-items:center">
+          <input type="checkbox" id="chk-auto"/> Auto enviar al guardar
+        </label>
+      </div>
+      <div class="note" style="margin-top:6px">
+        Pega abajo el <b>ID</b> de tu Google Sheets (lo largo entre <code>/d/</code> y <code>/edit</code> en la URL). Ejemplo:
+        <code>1-37_An9jRDsRsvAcMZX3gKPJS820ooGB7ETZSkIFD9g</code>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <div style="flex:1 1 360px">
+          <label>ID de tu Spreadsheet</label>
+          <input type="text" id="gs-id" placeholder="1-37_An9jRDsRsvAcMZX3gKPJS820ooGB7ETZSkIFD9g"/>
+        </div>
+        <div style="flex:1 1 200px">
+          <label>Hoja Movimientos</label>
+          <input type="text" id="gs-sheet-mov" value="Movimientos"/>
+        </div>
+        <div style="flex:1 1 200px">
+          <label>Hoja Saldos</label>
+          <input type="text" id="gs-sheet-sal" value="Saldos"/>
+        </div>
+      </div>
+    </section>
+
+    <section class="card" style="margin-top:12px">
+      <form id="form" class="grid">
+        <div class="col-2">
+          <label>Fecha</label>
+          <input type="date" id="fecha" />
+        </div>
+        <div>
+          <label>Tipo</label>
+          <select id="tipo">
+            <option value="Ingreso">Ingreso</option>
+            <option value="Salida">Salida</option>
+          </select>
+        </div>
+        <div>
+          <label>Lote</label>
+          <input type="text" id="lote" placeholder="L-2025-09-01" />
+        </div>
+        <div class="col-2">
+          <label>Especie</label>
+          <input type="text" id="especie" placeholder="Pino, Caoba…" />
+        </div>
+        <div>
+          <label>Ubicación</label>
+          <input type="text" id="ubicacion" placeholder="Bodega, Patio…" />
+        </div>
+
+        <div>
+          <label>Largo (cm)</label>
+          <input type="number" id="largo" min="0" step="0.01" />
+        </div>
+        <div>
+          <label>Ancho (cm)</label>
+          <input type="number" id="ancho" min="0" step="0.01" />
+        </div>
+        <div>
+          <label>Espesor (cm)</label>
+          <input type="number" id="espesor" min="0" step="0.01" />
+        </div>
+        <div>
+          <label>Cantidad (piezas)</label>
+          <input type="number" id="cantidad" min="1" step="1" />
+        </div>
+        <div>
+          <label>Precio (Q) opcional</label>
+          <input type="number" id="precio" min="0" step="0.01" />
+        </div>
+        <div class="col-6">
+          <label>Observaciones</label>
+          <input type="text" id="obs" placeholder="Proveedor, calidad, guía, etc." />
+        </div>
+        <div class="col-6 toolbar">
+          <button type="button" id="btn-add" class="primary">Agregar movimiento</button>
+          <button type="button" id="btn-save" class="ghost">Guardar dispositivo</button>
+          <button type="button" id="btn-load" class="ghost">Cargar guardado</button>
+          <button type="button" id="btn-clear" class="danger">Vaciar todo</button>
+        </div>
+        <div class="col-6 note">Las medidas son en <b>cm</b>. El sistema calcula PT por pieza y por movimiento. 1 PT = 144 in³.
+          Conversión: 1 in = 2.54 cm.</div>
+      </form>
+    </section>
+
+    <!-- Movimientos -->
+    <section class="card" style="margin-top:12px">
+      <div style="overflow:auto">
+        <table id="tbl-mov">
+          <thead>
+            <tr>
+              <th>#</th><th>Fecha</th><th>Tipo</th><th>Especie</th><th>Lote</th><th>Ubicación</th>
+              <th>Largo</th><th>Ancho</th><th>Espesor</th><th>Qty</th>
+              <th>PT/pza</th><th>PT mov</th><th>Precio</th><th>Subtotal</th><th>Obs</th><th>Acciones</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+          <tfoot>
+            <tr>
+              <td colspan="9" class="right">Totales</td>
+              <td id="movQty">0</td>
+              <td></td>
+              <td id="movPT">0.000</td>
+              <td></td>
+              <td id="movQ">0.00</td>
+              <td></td>
+              <td></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </section>
+
+    <!-- Saldos actuales agrupados -->
+    <section class="card" style="margin-top:12px">
+      <div class="toolbar" style="justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div><b>Saldos actuales</b> <span class="note">(agrupado por especie + lote + ubicación + medidas)</span></div>
+        <div class="badge" id="badgeItems">0 ítems</div>
+      </div>
+      <div style="overflow:auto">
+        <table id="tbl-saldo">
+          <thead>
+            <tr>
+              <th>Especie</th><th>Lote</th><th>Ubicación</th>
+              <th>Largo</th><th>Ancho</th><th>Espesor</th>
+              <th>Qty saldo</th><th>PT/pza</th><th>PT saldo</th><th>Valor Q (opcional)</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+          <tfoot>
+            <tr>
+              <td colspan="6" class="right">Totales</td>
+              <td id="saldoQty">0</td>
+              <td></td>
+              <td id="saldoPT">0.000</td>
+              <td id="saldoQ">0.00</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </section>
+
+    <p class="note">Los saldos se calculan tipo <b>Kardex</b> simple (cantidad). Si usas precios, se acumula subtotal por movimiento (no método de valoración específico). Podemos implementar <b>Promedio Ponderado</b> o <b>PEPS</b> si lo deseas.</p>
+  </div>
+
+  <script>
+    // ===== Utilidades =====
+    const $ = s=>document.querySelector(s);
+    const PT_TO_M3 = 0.002359737; // referencia por si la necesitas
+    const round = (n,d=3)=>Number.parseFloat(n||0).toFixed(d);
+
+    function cmToIn(cm){ return (cm||0)/2.54 }
+    function ptPerPiece(lcm, acm, ecm){
+      const L = cmToIn(lcm), A = cmToIn(acm), E = cmToIn(ecm);
+      return (L*A*E)/144; // pie tablar por pieza
+    }
+
+    // ===== Estado =====
+    let movimientos = [];
+
+    function keyOf(r){
+      return [r.especie, r.lote, r.ubicacion, r.largo, r.ancho, r.espesor].join('|');
+    }
+
+    function leerForm(){
+      const r = {
+        fecha: $('#fecha').value || new Date().toISOString().slice(0,10),
+        tipo: $('#tipo').value,
+        lote: $('#lote').value.trim(),
+        especie: $('#especie').value.trim(),
+        ubicacion: $('#ubicacion').value.trim(),
+        largo: Number($('#largo').value),
+        ancho: Number($('#ancho').value),
+        espesor: Number($('#espesor').value),
+        cantidad: Number($('#cantidad').value),
+        precio: Number($('#precio').value)||null,
+        obs: $('#obs').value.trim()
+      };
+      if(!r.largo||!r.ancho||!r.espesor||!r.cantidad||!r.especie){
+        alert('Completa especie, medidas y cantidad.');
+        return null;
+      }
+      // PT
+      r.pt_pieza = ptPerPiece(r.largo, r.ancho, r.espesor);
+      const signo = r.tipo==='Salida' ? -1 : 1;
+      r.pt_mov = r.pt_pieza * r.cantidad * signo;
+      r.subtotal = r.precio ? r.precio * r.cantidad * (signo>0?1:-1) : null; // si quieres valorar salidas negativo
+      return r;
+    }
+
+    function agregar(){
+      const r = leerForm();
+      if(!r) return;
+      movimientos.push(r);
+      render();
+      $('#form').reset();
+      $('#fecha').value = new Date().toISOString().slice(0,10);
+    }
+
+    function borrar(idx){ if(confirm('¿Eliminar movimiento?')){ movimientos.splice(idx,1); render(); } }
+
+    function render(){
+      // Movimientos
+      const tbody = $('#tbl-mov tbody'); tbody.innerHTML = '';
+      let tQty=0, tPT=0, tQ=0;
+      movimientos.forEach((m,i)=>{
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${i+1}</td>
+          <td>${m.fecha}</td>
+          <td>${m.tipo}</td>
+          <td>${m.especie}</td>
+          <td>${m.lote}</td>
+          <td>${m.ubicacion}</td>
+          <td>${m.largo}</td>
+          <td>${m.ancho}</td>
+          <td>${m.espesor}</td>
+          <td>${m.tipo==='Salida'?-m.cantidad:m.cantidad}</td>
+          <td>${round(m.pt_pieza)}</td>
+          <td>${round(m.pt_mov)}</td>
+          <td>${m.precio? m.precio.toFixed(2): ''}</td>
+          <td>${m.subtotal!==null? m.subtotal.toFixed(2): ''}</td>
+          <td>${m.obs||''}</td>
+          <td><button class="danger" onclick="borrar(${i})">Borrar</button></td>`;
+        tbody.appendChild(tr);
+        tQty += (m.tipo==='Salida'?-m.cantidad:m.cantidad);
+        tPT  += m.pt_mov;
+        tQ   += m.subtotal||0;
+      });
+      $('#movQty').textContent = tQty;
+      $('#movPT').textContent  = round(tPT);
+      $('#movQ').textContent   = tQ.toFixed(2);
+
+      // Saldos agrupados
+      const map = new Map();
+      for(const m of movimientos){
+        const k = keyOf(m);
+        if(!map.has(k)) map.set(k,{...m, cantidad:0, pt_pieza:m.pt_pieza, pt_saldo:0, valor:0});
+        const it = map.get(k);
+        it.cantidad += (m.tipo==='Salida'?-m.cantidad:m.cantidad);
+        it.pt_saldo += m.pt_mov;
+        it.valor    += m.subtotal||0; // acumulado simple
+      }
+      const saldoBody = $('#tbl-saldo tbody'); saldoBody.innerHTML = '';
+      let sQty=0, sPT=0, sQ=0, items=0;
+      for(const it of map.values()){
+        if(it.cantidad===0 && Math.abs(it.pt_saldo)<1e-9) continue; // ocultar cero
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${it.especie}</td>
+          <td>${it.lote}</td>
+          <td>${it.ubicacion}</td>
+          <td>${it.largo}</td>
+          <td>${it.ancho}</td>
+          <td>${it.espesor}</td>
+          <td>${it.cantidad}</td>
+          <td>${round(it.pt_pieza)}</td>
+          <td>${round(it.pt_saldo)}</td>
+          <td>${it.valor? it.valor.toFixed(2): ''}</td>`;
+        saldoBody.appendChild(tr);
+        sQty += it.cantidad; sPT += it.pt_saldo; sQ += it.valor||0; items++;
+      }
+      $('#saldoQty').textContent = sQty;
+      $('#saldoPT').textContent  = round(sPT);
+      $('#saldoQ').textContent   = sQ.toFixed(2);
+      $('#badgeItems').textContent = `${items} ítems`;
+
+      // Guardado automático
+      localStorage.setItem('kardex_madera', JSON.stringify(movimientos));
+    }
+
+    // ===== Persistencia local =====
+    function guardar(){ localStorage.setItem('kardex_madera', JSON.stringify(movimientos)); alert('Guardado en este dispositivo.'); }
+    function cargar(){ try{ const d = JSON.parse(localStorage.getItem('kardex_madera')||'[]'); movimientos = Array.isArray(d)? d: []; render(); }catch{ alert('No se pudo cargar.'); } }
+    function vaciar(){ if(confirm('¿Vaciar TODO?')){ movimientos = []; render(); } }
+
+    // ===== Exportación a Excel (.xlsx) =====
+    function buildWorkbook(){
+      // Hoja Movimientos
+      const mov = movimientos.map((m,i)=>({
+        N:i+1, Fecha:m.fecha, Tipo:m.tipo, Especie:m.especie, Lote:m.lote, Ubicación:m.ubicacion,
+        Largo_cm:m.largo, Ancho_cm:m.ancho, Espesor_cm:m.espesor, Cantidad: m.tipo==='Salida'?-m.cantidad:m.cantidad,
+        PT_por_pieza: Number(round(m.pt_pieza)), PT_mov: Number(round(m.pt_mov)), Precio_Q: m.precio??'', Subtotal_Q:m.subtotal??'', Obs:m.obs??''
+      }));
+
+      // Hoja Saldos
+      const map = new Map();
+      for(const m of movimientos){ const k=keyOf(m); if(!map.has(k)) map.set(k,{...m, cantidad:0, pt_pieza:m.pt_pieza, pt_saldo:0, valor:0});
+        const it=map.get(k); it.cantidad += (m.tipo==='Salida'?-m.cantidad:m.cantidad); it.pt_saldo += m.pt_mov; it.valor += m.subtotal||0; }
+      const sal = Array.from(map.values()).filter(x=>x.cantidad!==0 || Math.abs(x.pt_saldo)>1e-9).map((it)=>({
+        Especie:it.especie, Lote:it.lote, Ubicación:it.ubicacion, Largo_cm:it.largo, Ancho_cm:it.ancho, Espesor_cm:it.espesor,
+        Cantidad_saldo:it.cantidad, PT_por_pieza:Number(round(it.pt_pieza)), PT_saldo:Number(round(it.pt_saldo)), Valor_Q: it.valor||''
+      }));
+
+      const wb = XLSX.utils.book_new();
+      const ws1 = XLSX.utils.json_to_sheet(mov);
+      const ws2 = XLSX.utils.json_to_sheet(sal);
+      XLSX.utils.book_append_sheet(wb, ws1, 'Movimientos');
+      XLSX.utils.book_append_sheet(wb, ws2, 'Saldos');
+      return wb;
+    }
+
+    function downloadXLSX(){
+      const wb = buildWorkbook();
+      const name = `kardex_madera_${new Date().toISOString().slice(0,10)}.xlsx`;
+      XLSX.writeFile(wb, name);
+    }
+
+    function downloadCSV(){
+      const headers = ['Fecha','Tipo','Especie','Lote','Ubicación','Largo_cm','Ancho_cm','Espesor_cm','Cantidad','PT_por_pieza','PT_mov','Precio_Q','Subtotal_Q','Obs'];
+      const rows = movimientos.map(m=>[
+        m.fecha,m.tipo,m.especie,m.lote,m.ubicacion,m.largo,m.ancho,m.espesor,m.tipo==='Salida'?-m.cantidad:m.cantidad,round(m.pt_pieza),round(m.pt_mov),m.precio??'',m.subtotal??'',m.obs??''
+      ]);
+      const csv = [headers,...rows].map(r=>r.map(x=>`"${(x??'').toString().replace(/"/g,'""')}"`).join(',')).join('\n');
+      const blob = new Blob([csv],{type:'text/csv;charset=utf-8;'});
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `kardex_madera_${new Date().toISOString().slice(0,10)}.csv`; a.click(); URL.revokeObjectURL(a.href);
+    }
+
+    // ===== Google Sheets (append directo a tu hoja) =====
+    const G_CLIENT_ID = 'PEGAR_TU_CLIENT_ID_GOOGLE'; // <-- tu Client ID Web
+    const G_SCOPES = 'https://www.googleapis.com/auth/spreadsheets';
+
+    function gsInit(){ if(!window.gapi) return; gapi.load('client:auth2', async ()=>{
+      await gapi.client.init({ clientId: G_CLIENT_ID, scope: G_SCOPES, discoveryDocs: ['https://sheets.googleapis.com/$discovery/rest?version=v4'] });
+      // restaurar config
+      const saved = JSON.parse(localStorage.getItem('gs_config')||'{}');
+      if(saved.sheetId) $('#gs-id').value = saved.sheetId;
+      if(saved.sheetMov) $('#gs-sheet-mov').value = saved.sheetMov;
+      if(saved.sheetSal) $('#gs-sheet-sal').value = saved.sheetSal;
+      $('#chk-auto').checked = localStorage.getItem('gs_auto')==='1';
+    }); }
+    window.addEventListener('load', gsInit);
+
+    function saveGsConfig(){
+      const cfg = { sheetId: $('#gs-id').value.trim(), sheetMov: $('#gs-sheet-mov').value.trim(), sheetSal: $('#gs-sheet-sal').value.trim() };
+      localStorage.setItem('gs_config', JSON.stringify(cfg));
+    }
+
+    async function gsLogin(){
+      try{
+        const auth = gapi.auth2.getAuthInstance();
+        if(!auth) return alert('GAPI no listo');
+        if(!auth.isSignedIn.get()) await auth.signIn();
+        alert('Conectado a Google Sheets');
+      }catch(e){ console.error(e); alert('No se pudo iniciar sesión en Google.'); }
+    }
+
+    async function gsEnsureSheet(sheetId, title){
+      try{
+        const info = await gapi.client.sheets.spreadsheets.get({ spreadsheetId: sheetId });
+        const exists = info.result.sheets.some(s=>s.properties.title===title);
+        if(!exists){
+          await gapi.client.sheets.spreadsheets.batchUpdate({ spreadsheetId: sheetId, resource:{ requests:[{ addSheet:{ properties:{ title } } }] } });
+        }
+      }catch(err){ console.error(err); throw new Error('No se pudo verificar/crear la hoja: '+title); }
+    }
+
+    function movToRow(m){
+      return [m.fecha, m.tipo, m.especie, m.lote, m.ubicacion, m.largo, m.ancho, m.espesor,
+              (m.tipo==='Salida'?-m.cantidad:m.cantidad), Number(round(m.pt_pieza)), Number(round(m.pt_mov)),
+              m.precio??'', m.subtotal??'', m.obs??'', new Date().toISOString()];
+    }
+
+    function saldoItems(){
+      const map = new Map();
+      for(const m of movimientos){
+        const k = keyOf(m);
+        if(!map.has(k)) map.set(k,{...m, cantidad:0, pt_pieza:m.pt_pieza, pt_saldo:0, valor:0});
+        const it = map.get(k);
+        it.cantidad += (m.tipo==='Salida'?-m.cantidad:m.cantidad);
+        it.pt_saldo += m.pt_mov;
+        it.valor    += m.subtotal||0;
+      }
+      return Array.from(map.values()).filter(it=>it.cantidad!==0 || Math.abs(it.pt_saldo)>1e-9);
+    }
+
+    function saldoToRow(it){
+      return [it.especie, it.lote, it.ubicacion, it.largo, it.ancho, it.espesor,
+              it.cantidad, Number(round(it.pt_pieza)), Number(round(it.pt_saldo)), it.valor||'', new Date().toISOString()];
+    }
+
+    async function gsAppendRows(sheetId, title, rows){
+      await gsEnsureSheet(sheetId, title);
+      return gapi.client.sheets.spreadsheets.values.append({
+        spreadsheetId: sheetId, range: title+'!A1', valueInputOption: 'USER_ENTERED', insertDataOption: 'INSERT_ROWS',
+        resource: { values: rows }
+      });
+    }
+
+    async function sendLastMovement(){
+      saveGsConfig();
+      const sheetId = $('#gs-id').value.trim(); if(!sheetId) return alert('Coloca el ID del Spreadsheet.');
+      const title = $('#gs-sheet-mov').value.trim()||'Movimientos';
+      if(movimientos.length===0) return alert('No hay movimientos.');
+      await gsLogin();
+      const last = movimientos[movimientos.length-1];
+      const rows = [movToRow(last)];
+      try{ await gsAppendRows(sheetId, title, rows); alert('Movimiento enviado a Google Sheets.'); }
+      catch(e){ console.error(e); alert('Error al enviar a Sheets.'); }
+    }
+
+    async function sendAllMovements(){
+      saveGsConfig();
+      const sheetId = $('#gs-id').value.trim(); if(!sheetId) return alert('Coloca el ID del Spreadsheet.');
+      const title = $('#gs-sheet-mov').value.trim()||'Movimientos';
+      if(movimientos.length===0) return alert('No hay movimientos.');
+      await gsLogin();
+      const rows = movimientos.map(movToRow);
+      try{ await gsAppendRows(sheetId, title, rows); alert('Todos los movimientos enviados a Google Sheets.'); }
+      catch(e){ console.error(e); alert('Error al enviar a Sheets.'); }
+    }
+
+    async function sendSaldo(){
+      saveGsConfig();
+      const sheetId = $('#gs-id').value.trim(); if(!sheetId) return alert('Coloca el ID del Spreadsheet.');
+      const title = $('#gs-sheet-sal').value.trim()||'Saldos';
+      const items = saldoItems(); if(items.length===0) return alert('No hay saldos para enviar.');
+      await gsLogin();
+      const rows = items.map(saldoToRow);
+      try{ await gsAppendRows(sheetId, title, rows); alert('Saldos enviados a Google Sheets.'); }
+      catch(e){ console.error(e); alert('Error al enviar saldos a Sheets.'); }
+    }
+
+    // ===== Eventos =====
+    $('#btn-add').onclick = ()=>{ agregar(); if($('#chk-auto').checked) sendLastMovement(); };
+    $('#btn-save').onclick = guardar;
+    $('#btn-load').onclick = cargar;
+    $('#btn-clear').onclick = vaciar;
+    $('#btn-export-local').onclick = downloadXLSX;
+    $('#btn-csv').onclick = downloadCSV;
+
+    // Google Sheets
+    $('#btn-gs-login').onclick = gsLogin;
+    $('#btn-gs-send-last').onclick = sendLastMovement;
+    $('#btn-gs-send-all').onclick = sendAllMovements;
+    // Enviar saldos cuando cambien (botón implícito ejecutable desde consola si se quiere)
+    // Puedes llamar sendSaldo() desde F12 o agregar otro botón si prefieres.
+
+    $('#chk-auto').addEventListener('change', e=> localStorage.setItem('gs_auto', e.target.checked? '1':'0'));
+
+    // Inicialización
+    $('#fecha').value = new Date().toISOString().slice(0,10);
+    cargar();
+  </script>
+</body>
+</html>
